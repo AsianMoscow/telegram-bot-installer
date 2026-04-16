@@ -10,7 +10,7 @@ fi
 
 # --- input ---
 
-read -p "GitHub RAW URL (folder root, example: https://raw.githubusercontent.com/user/repo/main): " REPO_URL
+read -p "GitHub RAW URL (folder root, example: https://github.com/AsianMoscow/telegram-bot-installer): " REPO_URL
 read -p "Имя пользователя [telegram]: " BOT_USER
 BOT_USER=${BOT_USER:-telegram}
 
