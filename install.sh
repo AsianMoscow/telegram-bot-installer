@@ -1,16 +1,22 @@
 #!/bin/bash
 set -e
 
-echo "=== Telegram Bot Installer (GitHub-based v3) ==="
+echo "=== Telegram Bot Installer (fixed repo version) ==="
 
 if [ "$EUID" -ne 0 ]; then
 echo "❌ Запусти через sudo"
 exit 1
 fi
 
+# --- CONFIG (фиксированный репозиторий) ---
+
+REPO="https://raw.githubusercontent.com/AsianMoscow/telegram-bot-installer/master"
+
+BOT_FILE="$REPO/bot.py"
+REQ_FILE="$REPO/requirements.txt"
+
 # --- input ---
 
-read -p "GitHub RAW URL (folder root, example: https://github.com/AsianMoscow/telegram-bot-installer): " REPO_URL
 read -p "Имя пользователя [telegram]: " BOT_USER
 BOT_USER=${BOT_USER:-telegram}
 
@@ -24,7 +30,7 @@ BOT_DIR=$(pwd)
 echo ""
 echo "📦 DIR: $BOT_DIR"
 echo "👤 USER: $BOT_USER"
-echo "🌐 REPO: $REPO_URL"
+echo "📡 REPO: $REPO"
 echo ""
 
 # --- deps ---
@@ -38,24 +44,22 @@ if ! id "$BOT_USER" &>/dev/null; then
 adduser --disabled-password --gecos "" $BOT_USER
 fi
 
-# --- permissions ---
-
 chown -R $BOT_USER:$BOT_USER $BOT_DIR
 
 # --- venv ---
 
 sudo -u $BOT_USER python3 -m venv $BOT_DIR/venv
 
-# --- download bot code ---
+# --- download bot ---
 
-echo "=== Downloading bot code ==="
+echo "=== Download bot.py ==="
+curl -fsSL "$BOT_FILE" -o $BOT_DIR/bot.py
 
-curl -fsSL "$REPO_URL/bot.py" -o $BOT_DIR/bot.py
+# --- requirements ---
 
-# optional requirements
-
-if curl --output /dev/null --silent --head --fail "$REPO_URL/requirements.txt"; then
-curl -fsSL "$REPO_URL/requirements.txt" -o $BOT_DIR/requirements.txt
+echo "=== Dependencies ==="
+if curl --output /dev/null --silent --head --fail "$REQ_FILE"; then
+curl -fsSL "$REQ_FILE" -o $BOT_DIR/requirements.txt
 sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install --upgrade pip
 sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install -r $BOT_DIR/requirements.txt
 else
@@ -66,7 +70,6 @@ fi
 # --- .env ---
 
 echo "=== .env ==="
-
 cat > $BOT_DIR/.env <<EOF
 BOT_TOKEN=$BOT_TOKEN
 EOF
@@ -76,7 +79,7 @@ chmod 600 $BOT_DIR/.env
 
 # --- systemd ---
 
-echo "=== systemd service ==="
+echo "=== systemd ==="
 
 cat > /etc/systemd/system/$SERVICE_NAME.service <<EOF
 [Unit]
@@ -104,5 +107,4 @@ systemctl restart $SERVICE_NAME
 
 echo ""
 echo "✅ DONE"
-echo "📊 status: systemctl status $SERVICE_NAME"
 echo "📜 logs: journalctl -u $SERVICE_NAME -f"
