@@ -1,22 +1,21 @@
 #!/bin/bash
-
 set -e
 
-echo "=== Установка Telegram бота (в текущую директорию) ==="
+echo "=== Telegram Bot Installer (stable v2) ==="
 
-# --- Проверка root ---
+# --- root check ---
 
 if [ "$EUID" -ne 0 ]; then
-echo "Запусти скрипт через sudo"
+echo "❌ Запусти через sudo"
 exit 1
 fi
 
-# --- Ввод ---
+# --- input ---
 
-read -p "Имя пользователя для бота [telegram]: " BOT_USER
+read -p "Имя пользователя бота [telegram]: " BOT_USER
 BOT_USER=${BOT_USER:-telegram}
 
-read -p "Название сервиса [telegram_bot]: " SERVICE_NAME
+read -p "Имя сервиса [telegram_bot]: " SERVICE_NAME
 SERVICE_NAME=${SERVICE_NAME:-telegram_bot}
 
 read -p "Токен бота: " BOT_TOKEN
@@ -24,56 +23,54 @@ read -p "Токен бота: " BOT_TOKEN
 BOT_DIR=$(pwd)
 
 echo ""
-echo "=== Параметры ==="
-echo "Папка: $BOT_DIR"
-echo "Пользователь: $BOT_USER"
-echo "Сервис: $SERVICE_NAME"
+echo "📦 Папка: $BOT_DIR"
+echo "👤 Пользователь: $BOT_USER"
+echo "⚙️ Сервис: $SERVICE_NAME"
 echo ""
 
-# --- Создание пользователя ---
+# --- install deps ---
+
+echo "=== Установка зависимостей системы ==="
+apt update -y
+apt install -y python3 python3-venv python3-pip
+
+# --- user ---
 
 echo "=== Пользователь ==="
-if id "$BOT_USER" &>/dev/null; then
-echo "Пользователь уже существует"
-else
+if ! id "$BOT_USER" &>/dev/null; then
 adduser --disabled-password --gecos "" $BOT_USER
 fi
 
-# --- Установка зависимостей ---
+# --- permissions ---
 
-echo "=== Установка пакетов ==="
-apt update
-apt install -y python3 python3-venv python3-pip
-
-# --- Права на папку ---
-
-echo "=== Назначение прав ==="
 chown -R $BOT_USER:$BOT_USER $BOT_DIR
 
-# --- VENV ---
+# --- venv ---
 
-echo "=== Виртуальное окружение ==="
+echo "=== venv ==="
 sudo -u $BOT_USER python3 -m venv $BOT_DIR/venv
 
-echo "=== Установка библиотек ==="
+# --- pip deps ---
+
+echo "=== Python зависимости ==="
 sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install --upgrade pip
 sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install aiogram python-dotenv
 
 # --- .env ---
 
-echo "=== Создание .env ==="
-cat <<EOF > $BOT_DIR/.env
+echo "=== .env ==="
+cat > $BOT_DIR/.env <<EOF
 BOT_TOKEN=$BOT_TOKEN
 EOF
 
 chown $BOT_USER:$BOT_USER $BOT_DIR/.env
 chmod 600 $BOT_DIR/.env
 
-# --- bot.py ---
+# --- bot.py (ПРАВИЛЬНЫЙ, БЕЗ ОШИБОК ОТСТУПОВ) ---
 
-if [ ! -f "$BOT_DIR/bot.py" ]; then
-echo "=== Создание bot.py ==="
-cat <<EOF > $BOT_DIR/bot.py
+echo "=== bot.py ==="
+
+cat > $BOT_DIR/bot.py <<'EOF'
 import asyncio
 import logging
 import os
@@ -86,6 +83,9 @@ load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
 
+if not TOKEN:
+raise RuntimeError("BOT_TOKEN not found in .env")
+
 logging.basicConfig(
 level=logging.INFO,
 filename="bot.log",
@@ -97,7 +97,7 @@ dp = Dispatcher()
 
 @dp.message(Command("start"))
 async def start(message: Message):
-await message.answer("Бот работает 🚀")
+await message.answer("Бот запущен 🚀")
 
 async def main():
 await dp.start_polling(bot)
@@ -105,17 +105,16 @@ await dp.start_polling(bot)
 if **name** == "**main**":
 asyncio.run(main())
 EOF
-fi
 
 chown $BOT_USER:$BOT_USER $BOT_DIR/bot.py
 
 # --- systemd ---
 
-echo "=== Создание systemd сервиса ==="
+echo "=== systemd ==="
 
-cat <<EOF > /etc/systemd/system/$SERVICE_NAME.service
+cat > /etc/systemd/system/$SERVICE_NAME.service <<EOF
 [Unit]
-Description=Telegram Bot ($BOT_DIR)
+Description=Telegram Bot ($SERVICE_NAME)
 After=network.target
 
 [Service]
@@ -124,7 +123,6 @@ WorkingDirectory=$BOT_DIR
 ExecStart=$BOT_DIR/venv/bin/python $BOT_DIR/bot.py
 Restart=always
 RestartSec=5
-
 EnvironmentFile=$BOT_DIR/.env
 
 StandardOutput=append:$BOT_DIR/stdout.log
@@ -134,18 +132,15 @@ StandardError=append:$BOT_DIR/stderr.log
 WantedBy=multi-user.target
 EOF
 
-# --- Запуск ---
+# --- restart systemd ---
 
-echo "=== Запуск ==="
-systemctl daemon-reexec
+echo "=== запуск ==="
+
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl restart $SERVICE_NAME
 
 echo ""
-echo "=== ГОТОВО ==="
-echo "Папка: $BOT_DIR"
-echo "Пользователь: $BOT_USER"
-echo ""
-echo "Статус: systemctl status $SERVICE_NAME"
-echo "Логи: journalctl -u $SERVICE_NAME -f"
+echo "✅ ГОТОВО"
+echo "📊 статус: systemctl status $SERVICE_NAME"
+echo "📜 логи: journalctl -u $SERVICE_NAME -f"
