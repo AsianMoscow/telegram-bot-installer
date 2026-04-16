@@ -1,9 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== Telegram Bot Installer (stable v2) ==="
-
-# --- root check ---
+echo "=== Telegram Bot Installer (GitHub-based v3) ==="
 
 if [ "$EUID" -ne 0 ]; then
 echo "❌ Запусти через sudo"
@@ -12,31 +10,30 @@ fi
 
 # --- input ---
 
-read -p "Имя пользователя бота [telegram]: " BOT_USER
+read -p "GitHub RAW URL (folder root, example: https://raw.githubusercontent.com/user/repo/main): " REPO_URL
+read -p "Имя пользователя [telegram]: " BOT_USER
 BOT_USER=${BOT_USER:-telegram}
 
 read -p "Имя сервиса [telegram_bot]: " SERVICE_NAME
 SERVICE_NAME=${SERVICE_NAME:-telegram_bot}
 
-read -p "Токен бота: " BOT_TOKEN
+read -p "BOT TOKEN: " BOT_TOKEN
 
 BOT_DIR=$(pwd)
 
 echo ""
-echo "📦 Папка: $BOT_DIR"
-echo "👤 Пользователь: $BOT_USER"
-echo "⚙️ Сервис: $SERVICE_NAME"
+echo "📦 DIR: $BOT_DIR"
+echo "👤 USER: $BOT_USER"
+echo "🌐 REPO: $REPO_URL"
 echo ""
 
-# --- install deps ---
+# --- deps ---
 
-echo "=== Установка зависимостей системы ==="
 apt update -y
-apt install -y python3 python3-venv python3-pip
+apt install -y python3 python3-venv python3-pip curl
 
 # --- user ---
 
-echo "=== Пользователь ==="
 if ! id "$BOT_USER" &>/dev/null; then
 adduser --disabled-password --gecos "" $BOT_USER
 fi
@@ -47,18 +44,29 @@ chown -R $BOT_USER:$BOT_USER $BOT_DIR
 
 # --- venv ---
 
-echo "=== venv ==="
 sudo -u $BOT_USER python3 -m venv $BOT_DIR/venv
 
-# --- pip deps ---
+# --- download bot code ---
 
-echo "=== Python зависимости ==="
+echo "=== Downloading bot code ==="
+
+curl -fsSL "$REPO_URL/bot.py" -o $BOT_DIR/bot.py
+
+# optional requirements
+
+if curl --output /dev/null --silent --head --fail "$REPO_URL/requirements.txt"; then
+curl -fsSL "$REPO_URL/requirements.txt" -o $BOT_DIR/requirements.txt
+sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install --upgrade pip
+sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install -r $BOT_DIR/requirements.txt
+else
 sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install --upgrade pip
 sudo -u $BOT_USER $BOT_DIR/venv/bin/pip install aiogram python-dotenv
+fi
 
 # --- .env ---
 
 echo "=== .env ==="
+
 cat > $BOT_DIR/.env <<EOF
 BOT_TOKEN=$BOT_TOKEN
 EOF
@@ -66,51 +74,9 @@ EOF
 chown $BOT_USER:$BOT_USER $BOT_DIR/.env
 chmod 600 $BOT_DIR/.env
 
-# --- bot.py (ПРАВИЛЬНЫЙ, БЕЗ ОШИБОК ОТСТУПОВ) ---
-
-echo "=== bot.py ==="
-
-cat > $BOT_DIR/bot.py <<'EOF'
-import asyncio
-import logging
-import os
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message
-from aiogram.filters import Command
-from dotenv import load_dotenv
-
-load_dotenv()
-
-TOKEN = os.getenv("BOT_TOKEN")
-
-if not TOKEN:
-raise RuntimeError("BOT_TOKEN not found in .env")
-
-logging.basicConfig(
-level=logging.INFO,
-filename="bot.log",
-format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-
-@dp.message(Command("start"))
-async def start(message: Message):
-await message.answer("Бот запущен 🚀")
-
-async def main():
-await dp.start_polling(bot)
-
-if **name** == "**main**":
-asyncio.run(main())
-EOF
-
-chown $BOT_USER:$BOT_USER $BOT_DIR/bot.py
-
 # --- systemd ---
 
-echo "=== systemd ==="
+echo "=== systemd service ==="
 
 cat > /etc/systemd/system/$SERVICE_NAME.service <<EOF
 [Unit]
@@ -132,15 +98,11 @@ StandardError=append:$BOT_DIR/stderr.log
 WantedBy=multi-user.target
 EOF
 
-# --- restart systemd ---
-
-echo "=== запуск ==="
-
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl restart $SERVICE_NAME
 
 echo ""
-echo "✅ ГОТОВО"
-echo "📊 статус: systemctl status $SERVICE_NAME"
-echo "📜 логи: journalctl -u $SERVICE_NAME -f"
+echo "✅ DONE"
+echo "📊 status: systemctl status $SERVICE_NAME"
+echo "📜 logs: journalctl -u $SERVICE_NAME -f"
